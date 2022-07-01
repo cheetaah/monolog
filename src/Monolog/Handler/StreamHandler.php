@@ -202,20 +202,32 @@ class StreamHandler extends AbstractProcessingHandler
     private function createDir(string $url): void
     {
         // Do not try to create dir if it has already been tried.
-        if ($this->dirCreated) {
+        if (true === $this->dirCreated) {
             return;
         }
 
         $dir = $this->getDirFromStream($url);
-        if (null !== $dir && !is_dir($dir)) {
-            $this->errorMessage = null;
-            set_error_handler([$this, 'customErrorHandler']);
-            $status = mkdir($dir, 0777, true);
-            restore_error_handler();
-            if (false === $status && !is_dir($dir)) {
-                throw new \UnexpectedValueException(sprintf('There is no existing directory at "%s" and it could not be created: '.$this->errorMessage, $dir));
+
+        $dirLock = sys_get_temp_dir() . '/dir_lock_' . md5($dir);
+
+        $resourceLock = fopen($dirLock, "r+");
+
+        //  Gets the exclusive lock for creating directory in parallel mode (eg: paratest)
+        if (true === flock($resourceLock, LOCK_EX)) {
+            if (null !== $dir && !is_dir($dir)) {
+                $this->errorMessage = null;
+                set_error_handler([$this, 'customErrorHandler']);
+                $status = mkdir($dir, 0777, true);
+                restore_error_handler();
+                if (false === $status && !is_dir($dir)) {
+                    throw new \UnexpectedValueException(sprintf('There is no existing directory at "%s" and it could not be created: ' . $this->errorMessage, $dir));
+                }
             }
+            $this->dirCreated = true;
+
+            flock($resourceLock, LOCK_UN);
+            fclose($resourceLock);
+            unlink($dirLock);
         }
-        $this->dirCreated = true;
     }
 }
